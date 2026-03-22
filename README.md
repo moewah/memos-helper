@@ -8,6 +8,8 @@
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE) [![Python](https://img.shields.io/badge/python-3.8%2B-brightgreen.svg)](https://www.python.org/) [![Memos](https://img.shields.io/badge/Memos-API%20v1-blue)](https://usememos.com)
 
+</div>
+
 ---
 
 ## 简介
