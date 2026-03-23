@@ -5,7 +5,8 @@ Memos CLI - 完整版
 支持功能:
 - 纯文本内容 (支持 Markdown 和标签)
 - 本地文件自动上传 (图片/视频/音频/文档)
-- 完整的 CRUD 操作
+- 完整的 Memo CRUD 操作
+- 完整的附件 CRUD 操作 (创建/列表/获取/更新/删除)
 - 搜索功能
 - 网络波动自适应重试
 
@@ -14,7 +15,7 @@ Memos CLI - 完整版
 - MEMOS_ACCESS_TOKEN: 访问令牌
 
 作者: MoeWah (moewah.com)
-版本: 3.2.0
+版本: 4.2.0
 """
 
 import os
@@ -537,6 +538,138 @@ def delete_attachment(site_url, token, attachment_name):
     return status == 200
 
 
+def list_attachments(site_url, token, page_size=50, page_token=None, filter_str=None, order_by=None):
+    """列出附件
+
+    Args:
+        site_url: Memos 站点 URL
+        token: 访问令牌
+        page_size: 每页数量（默认50，最大1000）
+        page_token: 分页令牌
+        filter_str: 过滤条件，如 'mime_type=="image/png"' 或 'filename.contains("test")'
+        order_by: 排序，如 'create_time desc' 或 'filename asc'
+
+    Returns:
+        dict: 包含 attachments, nextPageToken, totalSize 的字典
+    """
+    params = [f"pageSize={page_size}"]
+    if page_token:
+        params.append(f"pageToken={page_token}")
+    if filter_str:
+        params.append(f"filter={quote(filter_str)}")
+    if order_by:
+        params.append(f"orderBy={quote(order_by)}")
+
+    url = f"{site_url}/api/v1/attachments?{'&'.join(params)}"
+    status, response = make_request("GET", url, token)
+
+    if status == 200:
+        return response
+    else:
+        print(f"❌ 列出附件失败: {status} - {response.get('message', 'Unknown error')}")
+        return None
+
+
+def get_attachment(site_url, token, attachment_id):
+    """获取单个附件详情
+
+    Args:
+        site_url: Memos 站点 URL
+        token: 访问令牌
+        attachment_id: 附件 ID（如 'xxxxx' 或 'attachments/xxxxx'）
+
+    Returns:
+        dict: 附件详情
+    """
+    # 支持 attachments/xxxxx 或纯 ID 格式
+    if not attachment_id.startswith("attachments/"):
+        attachment_id = f"attachments/{attachment_id}"
+
+    url = f"{site_url}/api/v1/{attachment_id}"
+    status, response = make_request("GET", url, token)
+
+    if status == 200:
+        return response
+    else:
+        print(f"❌ 获取附件失败: {status} - {response.get('message', 'Unknown error')}")
+        return None
+
+
+def update_attachment(site_url, token, attachment_id, filename=None, content_base64=None,
+                      external_link=None, mime_type=None, memo=None):
+    """更新附件
+
+    Args:
+        site_url: Memos 站点 URL
+        token: 访问令牌
+        attachment_id: 附件 ID
+        filename: 新文件名
+        content_base64: 新内容（Base64 编码）
+        external_link: 外部链接
+        mime_type: MIME 类型
+        memo: 关联的 Memo（格式: memos/xxxxx）
+
+    Returns:
+        dict: 更新后的附件详情
+    """
+    # 支持 attachments/xxxxx 或纯 ID 格式
+    if not attachment_id.startswith("attachments/"):
+        attachment_id = f"attachments/{attachment_id}"
+
+    update_fields = []
+    data = {}
+
+    if filename is not None:
+        data["filename"] = filename
+        update_fields.append("filename")
+    if mime_type is not None:
+        data["type"] = mime_type
+        update_fields.append("type")
+    if content_base64 is not None:
+        data["content"] = content_base64
+        update_fields.append("content")
+    if external_link is not None:
+        data["externalLink"] = external_link
+        update_fields.append("externalLink")
+    if memo is not None:
+        data["memo"] = memo
+        update_fields.append("memo")
+
+    if not update_fields:
+        print("❌ 没有需要更新的字段")
+        return None
+
+    url = f"{site_url}/api/v1/{attachment_id}?updateMask={','.join(update_fields)}"
+    status, response = make_request("PATCH", url, token, data)
+
+    if status == 200:
+        return response
+    else:
+        print(f"❌ 更新附件失败: {status} - {response.get('message', 'Unknown error')}")
+        return None
+
+
+def print_attachment_detail(att):
+    """打印附件详情"""
+    print(f"\n📎 附件详情:\n")
+    print(f"  名称: {att.get('name', 'N/A')}")
+    print(f"  文件名: {att.get('filename', 'N/A')}")
+    print(f"  类型: {att.get('type', 'N/A')}")
+    print(f"  大小: {att.get('size', 'N/A')}")
+
+    create_time = att.get('createTime')
+    if create_time:
+        print(f"  创建时间: {create_time}")
+
+    external_link = att.get('externalLink')
+    if external_link:
+        print(f"  外部链接: {external_link}")
+
+    memo = att.get('memo')
+    if memo:
+        print(f"  关联 Memo: {memo}")
+
+
 def cleanup_attachments(site_url, token, attachment_names):
     """清理已上传但未关联的附件"""
     if not attachment_names:
@@ -547,6 +680,181 @@ def cleanup_attachments(site_url, token, attachment_names):
             print(f"   ✅ 已删除: {name}")
         else:
             print(f"   ⚠️ 删除失败: {name}")
+
+
+def list_orphaned_attachments(site_url, token, page_size=100):
+    """列出所有未使用的附件（memo 字段为空）
+
+    Args:
+        site_url: Memos 站点 URL
+        token: 访问令牌
+        page_size: 每页数量
+
+    Returns:
+        list: 未使用的附件列表
+    """
+    all_orphaned = []
+    page_token = None
+
+    while True:
+        params = [f"pageSize={page_size}"]
+        if page_token:
+            params.append(f"pageToken={page_token}")
+
+        url = f"{site_url}/api/v1/attachments?{'&'.join(params)}"
+        status, response = make_request("GET", url, token)
+
+        if status != 200:
+            print(f"❌ 获取附件列表失败: {status}")
+            break
+
+        attachments = response.get("attachments", [])
+
+        # 过滤出 memo 为空的附件
+        for att in attachments:
+            if not att.get("memo"):
+                all_orphaned.append(att)
+
+        # 检查是否有更多数据
+        page_token = response.get("nextPageToken")
+        if not page_token:
+            break
+
+    return all_orphaned
+
+
+def cleanup_orphaned_attachments(site_url, token, force=False):
+    """清理所有未使用的附件
+
+    Args:
+        site_url: Memos 站点 URL
+        token: 访问令牌
+        force: 是否强制删除（不确认）
+
+    Returns:
+        int: 删除的附件数量
+    """
+    print("🔍 正在扫描未使用的附件...")
+    orphaned = list_orphaned_attachments(site_url, token)
+
+    if not orphaned:
+        print("✅ 没有发现未使用的附件")
+        return 0
+
+    total_size = sum(int(att.get("size", 0)) for att in orphaned)
+    total_size_mb = total_size / 1024 / 1024
+
+    print(f"\n📎 发现 {len(orphaned)} 个未使用的附件 (共 {total_size_mb:.2f} MB):\n")
+
+    for i, att in enumerate(orphaned, 1):
+        name = att.get("name", "N/A")
+        filename = att.get("filename", "N/A")
+        size = int(att.get("size", 0))
+        size_kb = size / 1024
+        create_time = att.get("createTime", "")
+
+        print(f"{i}. {name}")
+        print(f"   文件名: {filename}")
+        print(f"   大小: {size_kb:.1f} KB")
+        if create_time:
+            print(f"   创建时间: {create_time}")
+        print()
+
+    # 确认删除
+    if not force:
+        confirm = input(f"⚠️ 确认删除以上 {len(orphaned)} 个未使用的附件? (y/N): ")
+        if confirm.lower() != 'y':
+            print("❌ 已取消")
+            return 0
+
+    # 执行删除
+    deleted_count = 0
+    failed_count = 0
+
+    print("\n🧹 正在清理...")
+    for att in orphaned:
+        name = att.get("name")
+        if delete_attachment(site_url, token, name):
+            print(f"   ✅ 已删除: {name}")
+            deleted_count += 1
+        else:
+            print(f"   ❌ 删除失败: {name}")
+            failed_count += 1
+        time.sleep(0.2)  # 避免请求过快
+
+    print(f"\n📊 清理完成: {deleted_count} 个成功, {failed_count} 个失败")
+    return deleted_count
+
+
+def find_duplicate_memo(site_url, token, content, visibility):
+    """查找是否存在相同内容和可见性的 Memo（用于幂等性检查）
+
+    Args:
+        site_url: Memos 站点 URL
+        token: 访问令牌
+        content: Memo 内容
+        visibility: 可见性
+
+    Returns:
+        dict: 找到的 Memo 对象，未找到返回 None
+    """
+    # 使用 CEL 过滤器精确匹配
+    filter_str = f'visibility == "{visibility}"'
+    url = f"{site_url}/api/v1/memos?pageSize=20&filter={quote(filter_str)}"
+
+    status, response = make_request("GET", url, token, max_retries=1)
+
+    if status == 200:
+        memos = response.get("memos", [])
+        for memo in memos:
+            if not isinstance(memo, dict):
+                continue
+            # 精确匹配内容
+            if memo.get("content", "").strip() == content.strip():
+                return memo
+
+    return None
+
+
+def get_memo_by_id(site_url, token, memo_name):
+    """根据 ID 获取 Memo 详情
+
+    Args:
+        site_url: Memos 站点 URL
+        token: 访问令牌
+        memo_name: Memo 名称 (如: memos/xxxxx)
+
+    Returns:
+        dict: Memo 对象，失败返回 None
+    """
+    url = f"{site_url}/api/v1/{memo_name}"
+    status, response = make_request("GET", url, token, max_retries=1)
+
+    if status == 200:
+        return response
+    return None
+
+
+def check_memo_completeness(memo, expected_attachments):
+    """检查 Memo 是否完整（附件数量是否匹配）
+
+    Args:
+        memo: Memo 对象
+        expected_attachments: 预期的附件列表
+
+    Returns:
+        tuple: (is_complete, missing_count) - 是否完整，缺失附件数
+    """
+    if not memo:
+        return False, len(expected_attachments)
+
+    existing_atts = memo.get("attachments", [])
+    existing_count = len(existing_atts)
+    expected_count = len(expected_attachments)
+
+    if existing_count >= expected_count:
+        return True, 0
+    return False, expected_count - existing_count
 
 
 def create_memo(
@@ -561,6 +869,9 @@ def create_memo(
     max_retries=DEFAULT_MAX_RETRIES,
     retry_delay=None,
     strict_attachments=True,
+    state="NORMAL",
+    create_time=None,
+    display_time=None,
 ):
     """创建 Memo，支持预上传模式和指数退避重试
 
@@ -575,6 +886,9 @@ def create_memo(
         base64_files: 已编码的 .b64 文件路径列表
         max_retries: 创建失败时最大重试次数
         strict_attachments: 严格附件模式（True=必须全部上传成功才创建）
+        state: Memo 状态 (NORMAL/ARCHIVED)
+        create_time: 创建时间 (ISO 8601 格式)
+        display_time: 显示时间 (ISO 8601 格式)
     """
     all_attachments = list(attachments) if attachments else []
     uploaded_attachments = []
@@ -609,68 +923,141 @@ def create_memo(
 
     # 阶段2：创建 Memo（带重试）
     url = f"{site_url}/api/v1/memos"
-    data = {"content": content, "visibility": visibility, "pinned": pinned}
+    data = {
+        "content": content,
+        "visibility": visibility,
+        "pinned": pinned,
+        "state": state,
+    }
+
+    if create_time:
+        data["createTime"] = create_time
+
+    if display_time:
+        data["displayTime"] = display_time
 
     if all_attachments:
         data["attachments"] = [{"name": name} for name in all_attachments if name]
 
     print(f"\n📝 阶段2：创建 Memo...")
 
-    status, response = make_request("POST", url, token, data, max_retries=max_retries)
+    # 创建 Memo 带重试，每次失败后检查并清理可能存在的不完整 Memo
+    for attempt in range(1, max_retries + 1):
+        if attempt > 1:
+            delay = calculate_retry_delay(attempt)
+            print(f"   🔄 重试 {attempt}/{max_retries}（等待 {delay:.1f} 秒）...")
+            time.sleep(delay)
 
-    if status == 200:
-        memo_name = response.get("name", "N/A")
-        print(f"\n✅ Memo 创建成功!")
-        print(f"   名称: {memo_name}")
-        print(f"   可见性: {response.get('visibility', 'N/A')}")
+            # 重试前检查是否存在不完整的重复 Memo
+            existing = find_duplicate_memo(site_url, token, content, visibility)
+            if existing:
+                existing_name = existing.get("name")
+                print(f"   🔍 发现已存在的 Memo: {existing_name}，根据 ID 查询详情...")
 
-        tags = response.get("tags", [])
-        if tags:
-            print(f"   标签: {', '.join(tags)}")
+                # 根据 ID 获取最新详情
+                memo_detail = get_memo_by_id(site_url, token, existing_name)
 
-        attached = response.get("attachments", [])
-        if attached:
-            print(f"   附件: {len(attached)} 个")
+                if memo_detail:
+                    # 检查完整性
+                    is_complete, missing_count = check_memo_completeness(memo_detail, all_attachments)
 
-        memo_id = memo_name.split("/")[-1]
-        print(f"\n📝 URL: {site_url}/memos/{memo_id}")
-        return response
-    else:
-        error_msg = response.get("message", "未知错误")
-        print(f"\n❌ 创建失败 ({status}): {error_msg}")
+                    if is_complete:
+                        print(f"   ✅ Memo 完整，附件齐全")
+                        memo_id = existing_name.split("/")[-1]
+                        print(f"\n📝 URL: {site_url}/memos/{memo_id}")
+                        return memo_detail
+                    else:
+                        print(f"   ⚠️ Memo 不完整，缺失 {missing_count} 个附件")
+                        print(f"   🗑️ 删除不完整的 Memo...")
+                        delete_memo(site_url, token, existing_name)
+                else:
+                    print(f"   ⚠️ 无法获取 Memo 详情，跳过检查")
 
-        # 清理已上传但未关联的附件
-        if uploaded_attachments:
-            print("\n🧹 清理未关联附件...")
-            cleanup_attachments(site_url, token, uploaded_attachments)
+        # POST 创建请求不内部重试，避免重复创建；重试由外层循环控制
+        status, response = make_request("POST", url, token, data, max_retries=0)
 
-        return None
+        if status == 200:
+            memo_name = response.get("name", "N/A")
+            print(f"\n✅ Memo 创建成功!")
+            print(f"   名称: {memo_name}")
+            print(f"   可见性: {response.get('visibility', 'N/A')}")
+
+            tags = response.get("tags", [])
+            if tags:
+                print(f"   标签: {', '.join(tags)}")
+
+            attached = response.get("attachments", [])
+            if attached:
+                print(f"   附件: {len(attached)} 个")
+
+            memo_id = memo_name.split("/")[-1]
+            print(f"\n📝 URL: {site_url}/memos/{memo_id}")
+            return response
+
+    # 所有重试都失败
+    error_msg = response.get("message", "未知错误") if response else "请求失败"
+    print(f"\n❌ 创建失败: {error_msg}")
+
+    # 清理已上传但未关联的附件
+    if uploaded_attachments:
+        print("\n🧹 清理未关联附件...")
+        cleanup_attachments(site_url, token, uploaded_attachments)
+
+    return None
 
 
-def list_memos(site_url, token, page_size=10):
-    """列出 Memo"""
-    url = f"{site_url}/api/v1/memos?pageSize={page_size}"
+def list_memos(site_url, token, page_size=10, state=None, order_by=None, filter_str=None, show_deleted=False):
+    """列出 Memo
+
+    Args:
+        site_url: Memos 站点 URL
+        token: 访问令牌
+        page_size: 每页数量
+        state: 状态过滤 (NORMAL/ARCHIVED/STATE_UNSPECIFIED)
+        order_by: 排序字段 (pinned, display_time, create_time, update_time)
+        filter_str: 过滤条件 (CEL 表达式)
+        show_deleted: 是否显示已删除
+    """
+    params = [f"pageSize={page_size}"]
+
+    if state:
+        params.append(f"state={state}")
+    if order_by:
+        params.append(f"orderBy={quote(order_by)}")
+    if filter_str:
+        params.append(f"filter={quote(filter_str)}")
+    if show_deleted:
+        params.append("showDeleted=true")
+
+    url = f"{site_url}/api/v1/memos?{'&'.join(params)}"
     status, response = make_request("GET", url, token)
 
     if status == 200:
         memos = response.get("memos", [])
+        next_token = response.get("nextPageToken")
+
         print(f"\n📋 找到 {len(memos)} 条 Memo:\n")
 
         for i, memo in enumerate(memos, 1):
             if not isinstance(memo, dict):
                 continue
             name = memo.get("name", "N/A")
+            memo_state = memo.get("state", "NORMAL")
             content = memo.get("content", "")[:60]
             if len(memo.get("content", "")) > 60:
                 content += "..."
             vis = memo.get("visibility", "N/A")
             tags = ", ".join(memo.get("tags", []))
             att_count = len(memo.get("attachments", []))
+            pinned = "📌 " if memo.get("pinned") else ""
 
-            print(f"{i}. {name}")
+            print(f"{i}. {pinned}{name} [{memo_state}]")
             print(f"   {content}")
             print(f"   可见性: {vis} | 标签: [{tags}] | 附件: {att_count}")
             print()
+
+        if next_token:
+            print(f"📄 更多数据可用，使用 --page-token {next_token}")
     else:
         print(f"❌ 获取失败: {status}")
 
@@ -707,6 +1094,7 @@ def update_memo(
     content=None,
     visibility=None,
     pinned=None,
+    state=None,
     filepaths=None,
     base64_files=None,
     max_retries=DEFAULT_MAX_RETRIES,
@@ -721,6 +1109,7 @@ def update_memo(
         content: 新内容
         visibility: 可见性
         pinned: 是否置顶
+        state: 状态 (NORMAL/ARCHIVED)
         filepaths: 新文件路径列表
         base64_files: 新 .b64 文件路径列表
         max_retries: 更新失败时最大重试次数
@@ -768,6 +1157,9 @@ def update_memo(
     if pinned is not None:
         data["pinned"] = pinned
         update_fields.append("pinned")
+    if state is not None:
+        data["state"] = state
+        update_fields.append("state")
 
     # 合并新旧附件
     if new_attachments:
@@ -800,14 +1192,48 @@ def update_memo(
         error_msg = response.get("message", "未知错误")
         print(f"❌ 更新失败 ({status}): {error_msg}")
 
+        # 清理本次新上传但未能关联的附件
+        if new_attachments:
+            print(f"\n🧹 清理本次上传的 {len(new_attachments)} 个附件...")
+            cleanup_attachments(site_url, token, new_attachments)
 
-def delete_memo(site_url, token, memo_name):
-    """删除 Memo"""
+        return None
+
+
+def delete_memo(site_url, token, memo_name, cleanup_attachments_flag=False):
+    """删除 Memo
+
+    Args:
+        site_url: Memos 站点 URL
+        token: 访问令牌
+        memo_name: Memo 名称
+        cleanup_attachments_flag: 是否同时清理关联的附件
+    """
+    # 如果需要清理附件，先获取附件列表
+    memo_attachments = []
+    if cleanup_attachments_flag:
+        get_url = f"{site_url}/api/v1/{memo_name}"
+        status, response = make_request("GET", get_url, token, max_retries=1)
+        if status == 200 and isinstance(response, dict):
+            memo_attachments = [
+                att.get("name")
+                for att in response.get("attachments", [])
+                if isinstance(att, dict) and att.get("name")
+            ]
+            if memo_attachments:
+                print(f"📎 该 Memo 有 {len(memo_attachments)} 个关联附件")
+
     url = f"{site_url}/api/v1/{memo_name}"
     status, response = make_request("DELETE", url, token)
 
     if status == 200:
         print(f"✅ 已删除: {memo_name}")
+
+        # 清理关联的附件
+        if cleanup_attachments_flag and memo_attachments:
+            print(f"\n🧹 清理关联的 {len(memo_attachments)} 个附件...")
+            cleanup_attachments(site_url, token, memo_attachments)
+
     elif status == 404:
         print(f"ℹ️ Memo 不存在或已被删除: {memo_name}")
     elif status == 500:
@@ -816,6 +1242,70 @@ def delete_memo(site_url, token, memo_name):
     else:
         error_msg = response.get("message", "未知错误")
         print(f"❌ 删除失败 ({status}): {error_msg}")
+
+
+def list_memo_attachments(site_url, token, memo_name):
+    """列出 Memo 的所有附件
+
+    Args:
+        site_url: Memos 站点 URL
+        token: 访问令牌
+        memo_name: Memo 名称 (如: memos/xxxxx)
+    """
+    url = f"{site_url}/api/v1/{memo_name}/attachments"
+    status, response = make_request("GET", url, token)
+
+    if status == 200:
+        attachments = response.get("attachments", [])
+        print(f"\n📎 Memo {memo_name} 的附件 ({len(attachments)} 个):\n")
+
+        for i, att in enumerate(attachments, 1):
+            if not isinstance(att, dict):
+                continue
+            name = att.get("name", "N/A")
+            filename = att.get("filename", "N/A")
+            mime_type = att.get("type", "N/A")
+            size = att.get("size", "N/A")
+
+            print(f"{i}. {name}")
+            print(f"   文件名: {filename}")
+            print(f"   类型: {mime_type} | 大小: {size}")
+            print()
+
+        return attachments
+    else:
+        print(f"❌ 获取附件列表失败: {status}")
+        return None
+
+
+def set_memo_attachments(site_url, token, memo_name, attachment_names):
+    """设置 Memo 的附件（完全替换现有附件）
+
+    Args:
+        site_url: Memos 站点 URL
+        token: 访问令牌
+        memo_name: Memo 名称
+        attachment_names: 附件名称列表 (如: ["attachments/xxxxx", "attachments/yyyyy"])
+
+    Returns:
+        更新后的 Memo 对象
+    """
+    url = f"{site_url}/api/v1/{memo_name}:setAttachments"
+    data = {
+        "attachments": [{"name": name} for name in attachment_names if name]
+    }
+
+    status, response = make_request("PATCH", url, token, data)
+
+    if status == 200:
+        print(f"✅ 已设置附件: {memo_name}")
+        attachments = response.get("attachments", [])
+        print(f"   附件数量: {len(attachments)} 个")
+        return response
+    else:
+        error_msg = response.get("message", "未知错误")
+        print(f"❌ 设置附件失败 ({status}): {error_msg}")
+        return None
 
 
 def search_memos(site_url, token, keyword):
@@ -912,6 +1402,37 @@ def main():
 
   # 批量编码多个文件
   %(prog)s encode ~/photos/*.jpg --save
+
+【附件管理】
+  # 列出所有附件
+  %(prog)s att-list
+  %(prog)s att-list --page-size 20
+
+  # 过滤附件（按类型）
+  %(prog)s att-list --filter 'mime_type=="image/png"'
+
+  # 过滤附件（按文件名）
+  %(prog)s att-list --filter 'filename.contains("test")'
+
+  # 排序
+  %(prog)s att-list --order-by "create_time desc"
+
+  # 获取附件详情
+  %(prog)s att-get attachments/xxxxx
+  %(prog)s att-get xxxxx
+
+  # 更新附件文件名
+  %(prog)s att-update attachments/xxxxx --filename "new_name.jpg"
+
+  # 更新附件内容
+  %(prog)s att-update attachments/xxxxx --file ~/new_content.jpg
+
+  # 更新附件关联的 Memo
+  %(prog)s att-update attachments/xxxxx --memo memos/yyyyy
+
+  # 删除附件
+  %(prog)s att-delete attachments/xxxxx
+  %(prog)s att-delete attachments/xxxxx --force  # 不确认直接删除
         """,
     )
     subparsers = parser.add_subparsers(dest="command", help="可用命令")
@@ -953,10 +1474,33 @@ def main():
         action="store_true",
         help="宽松模式：允许部分附件失败时仍创建 Memo（默认严格模式）",
     )
+    create_parser.add_argument(
+        "--state", choices=["NORMAL", "ARCHIVED"], default="NORMAL",
+        help="Memo 状态（默认 NORMAL）"
+    )
+    create_parser.add_argument(
+        "--create-time", dest="create_time", help="创建时间 (ISO 8601 格式，如: 2024-01-15T10:30:00Z)"
+    )
+    create_parser.add_argument(
+        "--display-time", dest="display_time", help="显示时间 (ISO 8601 格式，如: 2024-01-15T10:30:00Z)"
+    )
 
     # List command
     list_parser = subparsers.add_parser("list", help="列出 Memo")
-    list_parser.add_argument("--page-size", type=int, default=10)
+    list_parser.add_argument("--page-size", type=int, default=10, help="每页数量（默认10）")
+    list_parser.add_argument(
+        "--state", choices=["NORMAL", "ARCHIVED", "STATE_UNSPECIFIED"],
+        help="状态过滤"
+    )
+    list_parser.add_argument(
+        "--order-by", help="排序字段（如: pinned desc, display_time desc）"
+    )
+    list_parser.add_argument(
+        "--filter", help="过滤条件 (CEL 表达式，如: 'visibility == \"PUBLIC\"')"
+    )
+    list_parser.add_argument(
+        "--show-deleted", action="store_true", help="显示已删除的 Memo"
+    )
 
     # Get command
     get_parser = subparsers.add_parser("get", help="查看 Memo")
@@ -971,6 +1515,9 @@ def main():
     )
     update_parser.add_argument(
         "--pinned", type=lambda x: x.lower() == "true", help="true/false"
+    )
+    update_parser.add_argument(
+        "--state", choices=["NORMAL", "ARCHIVED"], help="Memo 状态"
     )
     update_parser.add_argument(
         "-f",
@@ -994,6 +1541,8 @@ def main():
     # Delete command
     delete_parser = subparsers.add_parser("delete", help="删除 Memo")
     delete_parser.add_argument("name", help="Memo name")
+    delete_parser.add_argument("--cleanup-attachments", action="store_true",
+                               help="删除 Memo 后同时清理关联的附件")
 
     # Search command
     search_parser = subparsers.add_parser("search", help="搜索 Memo")
@@ -1013,6 +1562,55 @@ def main():
     encode_parser.add_argument(
         "--clipboard", action="store_true", help="复制到剪贴板（需要 pyperclip）"
     )
+
+    # ==================== Memo 附件命令 ====================
+
+    # Memo attachments list command
+    memo_att_list_parser = subparsers.add_parser("memo-att-list", help="列出 Memo 的附件",
+                                                  aliases=["memo-attachments"])
+    memo_att_list_parser.add_argument("name", help="Memo name (如: memos/xxxxx)")
+
+    # Memo attachments set command
+    memo_att_set_parser = subparsers.add_parser("memo-att-set", help="设置 Memo 的附件（完全替换）",
+                                                aliases=["set-memo-attachments"])
+    memo_att_set_parser.add_argument("name", help="Memo name")
+    memo_att_set_parser.add_argument("-a", "--attachment", action="append", required=True,
+                                      help="附件名称 (可多次使用, 如: attachments/xxxxx)")
+
+    # ==================== 附件命令 ====================
+
+    # Attachment list command
+    att_list_parser = subparsers.add_parser("att-list", help="列出所有附件",
+                                            aliases=["attachment-list", "attachments"])
+    att_list_parser.add_argument("--page-size", type=int, default=50,
+                                  help="每页数量（默认50，最大1000）")
+    att_list_parser.add_argument("--filter", help="过滤条件，如 'mime_type==\"image/png\"' 或 'filename.contains(\"test\")'")
+    att_list_parser.add_argument("--order-by", help="排序，如 'create_time desc' 或 'filename asc'")
+
+    # Attachment get command
+    att_get_parser = subparsers.add_parser("att-get", help="获取附件详情",
+                                           aliases=["attachment-get"])
+    att_get_parser.add_argument("id", help="附件 ID（如: xxxxx 或 attachments/xxxxx）")
+
+    # Attachment update command
+    att_update_parser = subparsers.add_parser("att-update", help="更新附件",
+                                              aliases=["attachment-update"])
+    att_update_parser.add_argument("id", help="附件 ID")
+    att_update_parser.add_argument("--filename", help="新文件名")
+    att_update_parser.add_argument("--file", "-f", help="新文件内容（本地文件路径，自动编码为 Base64）")
+    att_update_parser.add_argument("--external-link", help="外部链接")
+    att_update_parser.add_argument("--memo", help="关联的 Memo（格式: memos/xxxxx）")
+
+    # Attachment delete command
+    att_delete_parser = subparsers.add_parser("att-delete", help="删除附件",
+                                              aliases=["attachment-delete"])
+    att_delete_parser.add_argument("id", help="附件 ID")
+    att_delete_parser.add_argument("--force", action="store_true", help="强制删除（不确认）")
+
+    # Attachment cleanup command
+    att_cleanup_parser = subparsers.add_parser("att-cleanup", help="清理未使用的附件（memo为空的附件）",
+                                               aliases=["attachment-cleanup", "cleanup-attachments"])
+    att_cleanup_parser.add_argument("--force", action="store_true", help="强制删除（不确认）")
 
     args = parser.parse_args()
 
@@ -1091,10 +1689,13 @@ def main():
             args.max_retries,
             args.retry_delay,
             strict_attachments=not args.no_strict,
+            state=args.state,
+            create_time=args.create_time,
+            display_time=args.display_time,
         )
 
     elif args.command == "list":
-        list_memos(site_url, token, args.page_size)
+        list_memos(site_url, token, args.page_size, args.state, args.order_by, args.filter, args.show_deleted)
 
     elif args.command == "get":
         get_memo(site_url, token, args.name)
@@ -1107,6 +1708,7 @@ def main():
             args.content,
             args.visibility,
             args.pinned,
+            args.state,
             args.file,
             args.base64_file,
             args.max_retries,
@@ -1114,10 +1716,107 @@ def main():
         )
 
     elif args.command == "delete":
-        delete_memo(site_url, token, args.name)
+        delete_memo(site_url, token, args.name, cleanup_attachments_flag=args.cleanup_attachments)
 
     elif args.command == "search":
         search_memos(site_url, token, args.keyword)
+
+    # ==================== Memo 附件命令处理 ====================
+    elif args.command in ["memo-att-list", "memo-attachments"]:
+        list_memo_attachments(site_url, token, args.name)
+
+    elif args.command in ["memo-att-set", "set-memo-attachments"]:
+        set_memo_attachments(site_url, token, args.name, args.attachment)
+
+    # ==================== 附件命令处理 ====================
+    elif args.command in ["att-list", "attachment-list", "attachments"]:
+        result = list_attachments(site_url, token, args.page_size, filter_str=args.filter, order_by=args.order_by)
+        if result:
+            attachments = result.get("attachments", [])
+            total_size = result.get("totalSize", 0)
+            next_token = result.get("nextPageToken")
+
+            print(f"\n📎 找到 {len(attachments)} 个附件 (总计: {total_size}):\n")
+
+            for i, att in enumerate(attachments, 1):
+                if not isinstance(att, dict):
+                    continue
+                name = att.get("name", "N/A")
+                filename = att.get("filename", "N/A")
+                mime_type = att.get("type", "N/A")
+                size = att.get("size", "N/A")
+                create_time = att.get("createTime", "")
+
+                print(f"{i}. {name}")
+                print(f"   文件名: {filename}")
+                print(f"   类型: {mime_type} | 大小: {size}")
+                if create_time:
+                    print(f"   创建时间: {create_time}")
+                print()
+
+            if next_token:
+                print(f"📄 更多数据可用，使用 --page-token {next_token} 获取下一页")
+
+    elif args.command in ["att-get", "attachment-get"]:
+        att = get_attachment(site_url, token, args.id)
+        if att:
+            print_attachment_detail(att)
+
+    elif args.command in ["att-update", "attachment-update"]:
+        # 处理文件内容更新
+        content_base64 = None
+        mime_type = None
+        if args.file:
+            result = encode_file_to_base64(args.file)
+            if result:
+                content_base64 = result["base64_content"]
+                # 如果没有指定 filename，使用新文件的文件名
+                if not args.filename:
+                    args.filename = result["filename"]
+                # 自动检测 MIME 类型
+                mime_type = result["mime_type"]
+            else:
+                print("❌ 读取文件失败")
+                return
+
+        att = update_attachment(
+            site_url, token, args.id,
+            filename=args.filename,
+            content_base64=content_base64,
+            external_link=args.external_link,
+            mime_type=mime_type,
+            memo=args.memo
+        )
+        if att:
+            print(f"✅ 附件更新成功!")
+            print_attachment_detail(att)
+
+    elif args.command in ["att-delete", "attachment-delete"]:
+        # 确认删除
+        if not args.force:
+            att_id = args.id
+            if not att_id.startswith("attachments/"):
+                att_id = f"attachments/{att_id}"
+
+            confirm = input(f"⚠️ 确认删除附件 {att_id}? (y/N): ")
+            if confirm.lower() != 'y':
+                print("❌ 已取消")
+                return
+
+        att_id = args.id
+        if not att_id.startswith("attachments/"):
+            att_id = f"attachments/{att_id}"
+
+        url = f"{site_url}/api/v1/{att_id}"
+        status, response = make_request("DELETE", url, token)
+
+        if status == 200:
+            print(f"✅ 已删除附件: {att_id}")
+        else:
+            print(f"❌ 删除失败: {status} - {response.get('message', 'Unknown error')}")
+
+    elif args.command in ["att-cleanup", "attachment-cleanup", "cleanup-attachments"]:
+        cleanup_orphaned_attachments(site_url, token, force=args.force)
 
 
 if __name__ == "__main__":
