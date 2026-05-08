@@ -871,7 +871,6 @@ def create_memo(
     strict_attachments=True,
     state="NORMAL",
     create_time=None,
-    display_time=None,
 ):
     """创建 Memo，支持预上传模式和指数退避重试
 
@@ -888,7 +887,6 @@ def create_memo(
         strict_attachments: 严格附件模式（True=必须全部上传成功才创建）
         state: Memo 状态 (NORMAL/ARCHIVED)
         create_time: 创建时间 (ISO 8601 格式)
-        display_time: 显示时间 (ISO 8601 格式)
     """
     all_attachments = list(attachments) if attachments else []
     uploaded_attachments = []
@@ -932,9 +930,6 @@ def create_memo(
 
     if create_time:
         data["createTime"] = create_time
-
-    if display_time:
-        data["displayTime"] = display_time
 
     if all_attachments:
         data["attachments"] = [{"name": name} for name in all_attachments if name]
@@ -1014,7 +1009,7 @@ def list_memos(site_url, token, page_size=10, state=None, order_by=None, filter_
         token: 访问令牌
         page_size: 每页数量
         state: 状态过滤 (NORMAL/ARCHIVED/STATE_UNSPECIFIED)
-        order_by: 排序字段 (pinned, display_time, create_time, update_time)
+        order_by: 排序字段 (pinned, create_time, update_time)
         filter_str: 过滤条件 (CEL 表达式)
         show_deleted: 是否显示已删除
     """
@@ -1481,9 +1476,6 @@ def main():
     create_parser.add_argument(
         "--create-time", dest="create_time", help="创建时间 (ISO 8601 格式，如: 2024-01-15T10:30:00Z)"
     )
-    create_parser.add_argument(
-        "--display-time", dest="display_time", help="显示时间 (ISO 8601 格式，如: 2024-01-15T10:30:00Z)"
-    )
 
     # List command
     list_parser = subparsers.add_parser("list", help="列出 Memo")
@@ -1493,7 +1485,7 @@ def main():
         help="状态过滤"
     )
     list_parser.add_argument(
-        "--order-by", help="排序字段（如: pinned desc, display_time desc）"
+        "--order-by", help="排序字段（如: pinned desc, create_time desc）"
     )
     list_parser.add_argument(
         "--filter", help="过滤条件 (CEL 表达式，如: 'visibility == \"PUBLIC\"')"
@@ -1691,7 +1683,6 @@ def main():
             strict_attachments=not args.no_strict,
             state=args.state,
             create_time=args.create_time,
-            display_time=args.display_time,
         )
 
     elif args.command == "list":

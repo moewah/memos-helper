@@ -47,7 +47,7 @@ python {SKILL_DIR}/scripts/memos_cli.py create "Content" -f /path/to/file.jpg [-
 python {SKILL_DIR}/scripts/memos_cli.py create "Content" -a attachments/xxxxx
 
 # Create (with options)
-python {SKILL_DIR}/scripts/memos_cli.py create "Content" --state ARCHIVED --display-time "2024-01-15T10:30:00Z"
+python {SKILL_DIR}/scripts/memos_cli.py create "Content" --state ARCHIVED --create-time "2024-01-15T10:30:00Z"
 
 # List memos
 python {SKILL_DIR}/scripts/memos_cli.py list [--page-size N] [--state STATE] [--filter EXPR] [--show-deleted]

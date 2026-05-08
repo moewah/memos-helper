@@ -37,13 +37,12 @@ POST /api/v1/memos
   "visibility": "PRIVATE",
   "pinned": false,
   "state": "NORMAL",
-  "displayTime": "2024-01-15T10:30:00Z",
   "createTime": "2024-01-15T10:30:00Z",
   "attachments": [{"name": "attachments/xxxxx"}]
 }
 ```
 
-> Note: `createTime` and `displayTime` can only be set during creation, not during updates.
+> Note: `createTime` can only be set during creation, not during updates.
 
 ### Get / Update / Delete Memo
 
